@@ -1,0 +1,322 @@
+
+import tkinter as tk
+from tkinter import messagebox
+import sqlite3
+
+# LIGAR A BASE DE DADOS
+ligacao = sqlite3.connect("agenda.db")
+cursor = ligacao.cursor()
+
+# TABELA DE UTILIZADORES
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS utilizadores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL
+)
+""")
+
+# TABELA DE TAREFAS
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS tarefas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    titulo TEXT NOT NULL,
+    estado TEXT NOT NULL
+)
+""")
+
+ligacao.commit()
+
+
+# CRIAR CONTA
+def criar_conta():
+    user = caixa_user.get()
+    pw = caixa_pass.get()
+
+    if user == "" or pw == "":
+        messagebox.showwarning("AVISO", "FALTA PREENCHER CAMPOS!")
+        return
+
+    if len(pw) < 6:
+        messagebox.showwarning("AVISO", "A PASSWORD DEVE TER PELO MENOS 6 LETRAS OU NÚMEROS.")
+        return
+
+    try:
+        cursor.execute(
+            "INSERT INTO utilizadores (username, password) VALUES (?, ?)",
+            (user, pw)
+        )
+        ligacao.commit()
+
+        messagebox.showinfo("BOA", "CONTA CRIADA! JÁ PODE ENTRAR.")
+        caixa_user.delete(0, tk.END)
+        caixa_pass.delete(0, tk.END)
+
+    except sqlite3.IntegrityError:
+        messagebox.showerror("ERRO", "ESSE NOME JÁ ESTÁ A SER USADO.")
+
+
+# ENTRAR
+def entrar():
+    user = caixa_user.get()
+    pw = caixa_pass.get()
+
+    if user == "" or pw == "":
+        messagebox.showwarning("AVISO", "PREENCHE TUDO PRIMEIRO!")
+        return
+
+    cursor.execute(
+        "SELECT * FROM utilizadores WHERE username = ? AND password = ?",
+        (user, pw)
+    )
+
+    resultado = cursor.fetchone()
+
+    if resultado:
+        janela.destroy()
+        janela_principal(user)
+    else:
+        messagebox.showerror("ERRO", "DADOS INCORRETOS, TENTA OUTRA VEZ.")
+
+
+# MOSTRAR PASSWORD
+def ver_pass():
+    if caixa_pass.cget("show") == "*":
+        caixa_pass.config(show="")
+        btn_ver.config(text="ESCONDER")
+    else:
+        caixa_pass.config(show="*")
+        btn_ver.config(text="MOSTRAR")
+
+
+# JANELA PRINCIPAL
+def janela_principal(nome):
+    app = tk.Tk()
+    app.title("MINHA AGENDA")
+    app.geometry("500x550")
+
+    tk.Label(
+        app,
+        text="OLÁ " + nome,
+        font=("Arial", 18, "bold")
+    ).pack(pady=15)
+
+    tk.Label(app, text="NOVA TAREFA:").pack()
+
+    caixa_tarefa = tk.Entry(app, width=35)
+    caixa_tarefa.pack(pady=5)
+
+    lista = tk.Listbox(app, width=55, height=12)
+    lista.pack(pady=15)
+
+    # ATUALIZAR LISTA
+    def atualizar_lista():
+        lista.delete(0, tk.END)
+
+        cursor.execute(
+            "SELECT id, titulo, estado FROM tarefas WHERE username = ?",
+            (nome,)
+        )
+
+        tarefas = cursor.fetchall()
+
+        for tarefa in tarefas:
+            lista.insert(
+                tk.END,
+                tarefa[1] + " - " + tarefa[2]
+            )
+
+    # ADICIONAR TAREFA
+    def adicionar():
+        titulo = caixa_tarefa.get()
+
+        if titulo == "":
+            messagebox.showwarning("AVISO", "ESCREVE UMA TAREFA!")
+            return
+
+        cursor.execute(
+            "INSERT INTO tarefas (username, titulo, estado) VALUES (?, ?, ?)",
+            (nome, titulo, "Por fazer")
+        )
+
+        ligacao.commit()
+        caixa_tarefa.delete(0, tk.END)
+        atualizar_lista()
+
+    # OBTER TAREFA SELECIONADA
+    def tarefa_selecionada():
+        selecao = lista.curselection()
+
+        if not selecao:
+            messagebox.showwarning("AVISO", "SELECIONA UMA TAREFA!")
+            return None
+
+        cursor.execute(
+            "SELECT id, titulo, estado FROM tarefas WHERE username = ?",
+            (nome,)
+        )
+
+        tarefas = cursor.fetchall()
+        return tarefas[selecao[0]]
+
+    # ELIMINAR TAREFA
+    def eliminar():
+        tarefa = tarefa_selecionada()
+
+        if tarefa is None:
+            return
+
+        cursor.execute(
+            "DELETE FROM tarefas WHERE id = ? AND username = ?",
+            (tarefa[0], nome)
+        )
+
+        ligacao.commit()
+        atualizar_lista()
+
+    # ALTERAR ESTADO
+    def alterar_estado():
+        tarefa = tarefa_selecionada()
+
+        if tarefa is None:
+            return
+
+        if tarefa[2] == "Por fazer":
+            novo_estado = "Em curso"
+        elif tarefa[2] == "Em curso":
+            novo_estado = "Concluída"
+        else:
+            novo_estado = "Por fazer"
+
+        cursor.execute(
+            "UPDATE tarefas SET estado = ? WHERE id = ? AND username = ?",
+            (novo_estado, tarefa[0], nome)
+        )
+
+        ligacao.commit()
+        atualizar_lista()
+
+    # EDITAR TAREFA
+    def editar():
+        tarefa = tarefa_selecionada()
+
+        if tarefa is None:
+            return
+
+        nova_janela = tk.Toplevel(app)
+        nova_janela.title("EDITAR TAREFA")
+        nova_janela.geometry("300x180")
+
+        tk.Label(nova_janela, text="NOVO NOME:").pack(pady=10)
+
+        caixa_editar = tk.Entry(nova_janela, width=30)
+        caixa_editar.pack()
+        caixa_editar.insert(0, tarefa[1])
+
+        def guardar_edicao():
+            novo_titulo = caixa_editar.get()
+
+            if novo_titulo == "":
+                messagebox.showwarning("AVISO", "ESCREVE UM NOME!")
+                return
+
+            cursor.execute(
+                "UPDATE tarefas SET titulo = ? WHERE id = ? AND username = ?",
+                (novo_titulo, tarefa[0], nome)
+            )
+
+            ligacao.commit()
+            nova_janela.destroy()
+            atualizar_lista()
+
+        tk.Button(
+            nova_janela,
+            text="GUARDAR",
+            command=guardar_edicao
+        ).pack(pady=15)
+
+    # BOTÕES
+    tk.Button(
+        app,
+        text="ADICIONAR TAREFA",
+        command=adicionar
+    ).pack(pady=5)
+
+    tk.Button(
+        app,
+        text="EDITAR TAREFA",
+        command=editar
+    ).pack(pady=5)
+
+    tk.Button(
+        app,
+        text="ELIMINAR TAREFA",
+        command=eliminar
+    ).pack(pady=5)
+
+    tk.Button(
+        app,
+        text="ALTERAR ESTADO",
+        command=alterar_estado
+    ).pack(pady=5)
+
+    tk.Button(
+        app,
+        text="SAIR",
+        command=app.destroy
+    ).pack(pady=15)
+
+    atualizar_lista()
+    app.mainloop()
+
+
+# JANELA INICIAL
+janela = tk.Tk()
+janela.title("LOGIN")
+janela.geometry("350x400")
+
+titulo = tk.Label(
+    janela,
+    text="AGENDA",
+    font=("Arial", 20, "bold")
+)
+titulo.pack(pady=20)
+
+tk.Label(janela, text="UTILIZADOR:").pack()
+
+caixa_user = tk.Entry(janela, width=25)
+caixa_user.pack(pady=5)
+
+tk.Label(janela, text="PASSWORD:").pack(pady=(10, 0))
+
+caixa_pass = tk.Entry(janela, width=25, show="*")
+caixa_pass.pack(pady=5)
+
+btn_ver = tk.Button(
+    janela,
+    text="MOSTRAR",
+    command=ver_pass
+)
+btn_ver.pack(pady=5)
+
+btn_entrar = tk.Button(
+    janela,
+    text="ENTRAR",
+    width=20,
+    bg="black",
+    fg="white",
+    command=entrar
+)
+btn_entrar.pack(pady=20)
+
+btn_registar = tk.Button(
+    janela,
+    text="CRIAR CONTA NOVA",
+    command=criar_conta
+)
+btn_registar.pack()
+
+janela.mainloop()
+
+ligacao.close()
